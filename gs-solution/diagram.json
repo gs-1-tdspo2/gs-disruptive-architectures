@@ -5,8 +5,6 @@
   "parts": [
     { "type": "board-esp32-devkit-c-v4", "id": "esp", "top": 0, "left": 0, "attrs": {} },
     { "type": "wokwi-mpu6050", "id": "imu1", "top": -101.78, "left": -16.88, "attrs": {} },
-    { "type": "wokwi-potentiometer", "id": "pot1", "top": -87.7, "left": -144.2, "attrs": {} },
-    { "type": "wokwi-potentiometer", "id": "pot2", "top": 46.7, "left": -163.4, "attrs": {} },
     { "type": "wokwi-hc-sr04", "id": "ultrasonic1", "top": 260.7, "left": -32.9, "attrs": {} },
     {
       "type": "wokwi-led",
@@ -44,6 +42,14 @@
       "top": -180,
       "left": 200,
       "attrs": { "i2cAddress": "0x3c" }
+    },
+    { "type": "board-bmp180", "id": "bmp1", "top": -80.96, "left": 249.86, "attrs": {} },
+    {
+      "type": "wokwi-slide-potentiometer",
+      "id": "pot1",
+      "top": -33.4,
+      "left": -308.2,
+      "attrs": { "travelLength": "30" }
     }
   ],
   "connections": [
@@ -53,15 +59,9 @@
     [ "imu1:SCL", "esp:22", "#8f4814", [ "v-38.4", "h76.88", "v182.4" ] ],
     [ "imu1:GND", "esp:GND.2", "black", [ "v-28.8", "h0.08" ] ],
     [ "imu1:VCC", "esp:3V3", "red", [ "v0", "h19.28", "v76.8", "h-67.2" ] ],
-    [ "oled1:SDA", "esp:21", "gold", [ "v-18.46", "h49.9", "v268.8", "h-216.04" ] ],
+    [ "oled1:SDA", "esp:21", "gold", [ "v-18.46", "h213.1", "v268.8" ] ],
     [ "oled1:SCL", "esp:22", "brown", [ "v-28.06", "h-141.87", "v249.6" ] ],
     [ "oled1:VCC", "esp:3V3", "violet", [ "v-37.66", "h-286.02", "v192", "h43.01" ] ],
-    [ "pot1:VCC", "esp:3V3", "cyan", [ "v38.4", "h99.81" ] ],
-    [ "pot2:VCC", "esp:3V3", "magenta", [ "h47.2", "v-96", "h139.01" ] ],
-    [ "pot1:GND", "esp:GND.1", "yellow", [ "v38.4", "h-76.8", "v124.8" ] ],
-    [ "pot2:GND", "esp:GND.1", "limegreen", [ "v38.4", "h115.2" ] ],
-    [ "pot2:SIG", "esp:35", "green", [ "v9.6", "h95.6", "v-48", "h9.6" ] ],
-    [ "pot1:SIG", "esp:34", "orange", [ "v57.6", "h76.4", "v28.8" ] ],
     [ "ultrasonic1:VCC", "esp:5V", "red", [ "v9.6", "h-96", "v-163.2" ] ],
     [ "ultrasonic1:GND", "esp:GND.3", "black", [ "v9.6", "h85.2", "v-278.4" ] ],
     [ "ultrasonic1:TRIG", "esp:5", "blue", [ "v19.2", "h114.8", "v-259.2" ] ],
@@ -72,7 +72,14 @@
     [ "ledVerde:C", "esp:GND.3", "cyan", [ "h28.4", "v-38.4", "h-312.04" ] ],
     [ "ledVermelho:C", "esp:GND.3", "white", [ "h48", "v-76.8" ] ],
     [ "r2:2", "esp:16", "red", [ "h-147.64" ] ],
-    [ "oled1:GND", "esp:GND.2", "gray", [ "v-18.46", "h-142.17" ] ]
+    [ "oled1:GND", "esp:GND.2", "gray", [ "v-18.46", "h-142.17" ] ],
+    [ "bmp1:GND", "esp:GND.2", "black", [ "h28.8", "v96.19" ] ],
+    [ "bmp1:VCC", "esp:3V3", "orange", [ "h28.8", "v-153.6", "h-412.8", "v211.2", "h67.2" ] ],
+    [ "bmp1:SDA", "esp:21", "cyan", [ "h9.6", "v124.99" ] ],
+    [ "bmp1:SCL", "esp:22", "magenta", [ "h19.2", "v96.19" ] ],
+    [ "pot1:VCC", "esp:3V3", "magenta", [ "v-28.8", "h311.81" ] ],
+    [ "pot1:SIG", "esp:35", "green", [ "v47.2", "h311.81" ] ],
+    [ "pot1:GND", "esp:GND.1", "black", [ "h43.6", "v124.8" ] ]
   ],
   "dependencies": {}
 }
