@@ -50,6 +50,13 @@
       "top": -33.4,
       "left": -308.2,
       "attrs": { "travelLength": "30" }
+    },
+    {
+      "type": "wokwi-buzzer",
+      "id": "bz1",
+      "top": 98.4,
+      "left": -276.6,
+      "attrs": { "volume": "0.1" }
     }
   ],
   "connections": [
@@ -79,7 +86,9 @@
     [ "bmp1:SCL", "esp:22", "magenta", [ "h19.2", "v96.19" ] ],
     [ "pot1:VCC", "esp:3V3", "magenta", [ "v-28.8", "h311.81" ] ],
     [ "pot1:SIG", "esp:35", "green", [ "v47.2", "h311.81" ] ],
-    [ "pot1:GND", "esp:GND.1", "black", [ "h43.6", "v124.8" ] ]
+    [ "pot1:GND", "esp:GND.1", "black", [ "h43.6", "v124.8" ] ],
+    [ "bz1:2", "esp:12", "purple", [ "v0", "h134", "v-38.4" ] ],
+    [ "bz1:1", "esp:GND.1", "magenta", [ "v19.2", "h163.2", "v-48" ] ]
   ],
   "dependencies": {}
 }

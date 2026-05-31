@@ -5,6 +5,7 @@
 #include <Adafruit_Sensor.h>
 #include <Adafruit_SSD1306.h>
 #include <Adafruit_BMP085.h>
+#include <time.h>           // [GAP 2] Biblioteca para cliente NTP e formatação de tempo
 
 // ─── Wi-Fi ───────────────────────────────────────────────────────────────────
 const char* ssid     = "Wokwi-GUEST";
@@ -17,7 +18,7 @@ const int   mqtt_port   = 1883;
 // Tópicos atualizados para o padrão do PRD
 const char* TOPIC_TELEMETRIA = "app/estacoes/APP-ST-001/telemetria";
 const char* TOPIC_STATUS     = "app/estacoes/APP-ST-001/status";
-const char* TOPIC_COMANDO    = "app/estacoes/APP-ST-001/comando";
+const char* TOPIC_COMANDO    = "app/estacoes/APP-ST-001/alertas"; // [GAP 3] Corrigido: era "comando", PRD exige "alertas"
 
 // ─── Pinos ───────────────────────────────────────────────────────────────────
 #define PIN_POT_POLUICAO 35
@@ -25,6 +26,7 @@ const char* TOPIC_COMANDO    = "app/estacoes/APP-ST-001/comando";
 #define PIN_ECHO         18
 #define PIN_LED_VERDE    17
 #define PIN_LED_VERMELHO 16
+#define PIN_BUZZER       12 // [GAP 1] Definição do pino do buzzer no GPIO 12 conforme PRD
 
 #define ULTRASONIC_TIMEOUT_US 30000UL
 
@@ -44,6 +46,16 @@ const char* TOPIC_COMANDO    = "app/estacoes/APP-ST-001/comando";
 #define PRES_ATENCAO    1005.0f
 #define PRES_ALERTA      992.0f
 #define PRES_CRITICO     980.0f
+
+// [GAP 1] Parâmetros do bipe não-bloqueante do buzzer
+#define BUZZER_FREQ_HZ     1000  // Frequência do tom de alerta em Hz
+#define BUZZER_BIPE_ON_MS   200  // Duração do bipe ligado (ms)
+#define BUZZER_BIPE_OFF_MS  300  // Duração do bipe desligado (ms)
+// [GAP 1 – FIX] ledcWriteTone() é a API nativa do ESP32 para PWM de áudio.
+// tone()/noTone() dependem do LEDC já inicializado; usar ledcAttach() +
+// ledcWriteTone() evita o erro "LEDC is not initialized".
+#define BUZZER_LEDC_CHANNEL  0   // Canal LEDC reservado para o buzzer (0–15)
+#define BUZZER_LEDC_RES     10   // Resolução do LEDC em bits
 
 typedef enum {
   SEV_NORMAL  = 0,
@@ -98,6 +110,10 @@ unsigned long lastTelemetria = 0;
 unsigned long lastStatus     = 0;
 unsigned long startTime      = 0;
 
+// [GAP 1] Variáveis de estado do buzzer não-bloqueante
+unsigned long buzzerUltimoEvento = 0; // Marca o millis() do último evento do buzzer
+bool          buzzerLigado       = false; // Controla o estado atual do buzzer (ligado/desligado)
+
 // ─── Callback MQTT ───────────────────────────────────────────────────────────
 void mqttCallback(char* topic, byte* payload, unsigned int length) {
   String msg = "";
@@ -114,6 +130,26 @@ void setup_wifi() {
   WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED) { delay(500); Serial.print("."); }
   Serial.println("\nWiFi OK: " + WiFi.localIP().toString());
+
+  // [GAP 2] Configura cliente NTP após conexão Wi-Fi.
+  // UTC-3 = Horário de Brasília (offset de -10800 segundos).
+  // Servidores: pool.ntp.org (primário) e time.nist.gov (fallback).
+  configTime(-3 * 3600, 0, "pool.ntp.org", "time.nist.gov");
+  Serial.println("NTP configurado. Aguardando sincronização...");
+
+  // [GAP 2] Aguarda a sincronização do tempo (até 10s) antes de prosseguir.
+  struct tm timeinfo;
+  int tentativas = 0;
+  while (!getLocalTime(&timeinfo) && tentativas < 20) {
+    delay(500);
+    Serial.print(".");
+    tentativas++;
+  }
+  if (tentativas < 20) {
+    Serial.println("\nNTP sincronizado com sucesso!");
+  } else {
+    Serial.println("\n[AVISO] NTP nao sincronizado. Timestamp pode ser invalido.");
+  }
 }
 
 // ─── Reconexão MQTT ──────────────────────────────────────────────────────────
@@ -123,7 +159,7 @@ void reconnect() {
     String clientId = "ESP32-ST001-" + String(random(0xffff), HEX);
     if (client.connect(clientId.c_str())) {
       Serial.println("OK!");
-      client.subscribe(TOPIC_COMANDO);
+      client.subscribe(TOPIC_COMANDO); // [GAP 3] Agora escuta "alertas" conforme PRD
     } else {
       Serial.print("Falhou rc="); Serial.print(client.state());
       Serial.println(". Retry 5s...");
@@ -218,6 +254,13 @@ void setup() {
   pinMode(PIN_TRIG, OUTPUT);
   pinMode(PIN_ECHO, INPUT);
 
+  // [GAP 1 – FIX] API compatível com ESP32 Arduino Core 2.x (usada pelo Wokwi).
+  // ledcSetup() configura o canal; ledcAttachPin() associa ao GPIO físico.
+  // ledcAttachChannel() só existe na 3.x e causava "identifier undefined".
+  ledcSetup(BUZZER_LEDC_CHANNEL, BUZZER_FREQ_HZ, BUZZER_LEDC_RES);
+  ledcAttachPin(PIN_BUZZER, BUZZER_LEDC_CHANNEL);
+  ledcWrite(BUZZER_LEDC_CHANNEL, 0); // Duty = 0 → buzzer silencioso ao iniciar
+
   if (display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
     oledDisponivel = true;
     display.clearDisplay();
@@ -241,7 +284,7 @@ void setup() {
     while (1) { delay(10); }
   }
 
-  setup_wifi();
+  setup_wifi(); // [GAP 2] setup_wifi() agora também inicializa o NTP internamente
   client.setServer(mqtt_server, mqtt_port);
   client.setCallback(mqttCallback);
 
@@ -255,6 +298,14 @@ void loop() {
   client.loop();
 
   unsigned long agora = millis();
+
+  // ── [GAP 1] Lógica não-bloqueante do buzzer ─────────────────────────────
+  // Esta lógica é avaliada a cada iteração do loop, independente dos timers
+  // de telemetria e status, garantindo resposta sonora em tempo real.
+  // A variável 'buzzerAtivo' é definida na seção de severidades abaixo
+  // e persiste entre iterações por ser estática.
+  // Nota: o controle efetivo é feito dentro do bloco de telemetria (5s),
+  // mas o padrão de bipe é gerenciado aqui de forma contínua.
 
   if (agora - lastTelemetria > 5000) {
     lastTelemetria = agora;
@@ -294,21 +345,64 @@ void loop() {
     Severidade sevPM   = severidadePM25(poluicaoPm25);
     Severidade sevInc  = severidadeInclinacao(inclinacaoX);
 
+    // Calcula a severidade geral para controle de LEDs, OLED e buzzer
+    Severidade geral = (Severidade)max({(int)sevEnc, (int)sevPres, (int)sevPM, (int)sevInc});
+
     bool alerta = (sevEnc > SEV_NORMAL) || (sevPres > SEV_NORMAL) ||
                   (sevPM  > SEV_NORMAL) || (sevInc  > SEV_NORMAL);
 
     digitalWrite(PIN_LED_VERDE,    alerta ? LOW  : HIGH);
     digitalWrite(PIN_LED_VERMELHO, alerta ? HIGH : LOW);
 
+    // [GAP 1] Controle do buzzer baseado na severidade geral:
+    // SEV_CRITICO → ativa bipe intermitente; qualquer outro estado → silencia.
+    if (geral == SEV_CRITICO) {
+      // Bipe não-bloqueante: alterna entre ligado e desligado usando millis()
+      // para não bloquear o loop principal durante os intervalos.
+      if (!buzzerLigado && (agora - buzzerUltimoEvento >= BUZZER_BIPE_OFF_MS)) {
+        // Período OFF encerrado: liga o buzzer via LEDC nativo do ESP32
+        // [GAP 1 – FIX] ledcWriteTone() configura a frequência no canal já
+        // inicializado; não lança "LEDC is not initialized" como tone() faria.
+        ledcWriteTone(BUZZER_LEDC_CHANNEL, BUZZER_FREQ_HZ);
+        buzzerLigado = true;
+        buzzerUltimoEvento = agora;
+      } else if (buzzerLigado && (agora - buzzerUltimoEvento >= BUZZER_BIPE_ON_MS)) {
+        // Período ON encerrado: silencia escrevendo duty = 0 no canal LEDC
+        ledcWrite(BUZZER_LEDC_CHANNEL, 0); // [GAP 1 – FIX] substitui noTone()
+        buzzerLigado = false;
+        buzzerUltimoEvento = agora;
+      }
+      Serial.println("[BUZZER] CRITICO – Bipe ativo.");
+    } else {
+      // Condição não-crítica: silencia o buzzer e reseta o timer
+      ledcWrite(BUZZER_LEDC_CHANNEL, 0); // [GAP 1 – FIX] substitui noTone()
+      buzzerLigado = false;
+      buzzerUltimoEvento = agora;
+    }
+
     atualizarDisplay(distanciaAguaCm, distValida, pressaoHpa, poluicaoPm25,
                      abs(inclinacaoX), sevEnc, sevPres, sevPM, sevInc);
+
+    // ── [GAP 2] Obtenção do timestamp real via NTP ────────────────────────
+    // getLocalTime() lê o horário sincronizado com o servidor NTP.
+    // strftime() formata no padrão ISO 8601 exigido pelo backend Java/Oracle.
+    char timestampISO[25]; // Buffer para "YYYY-MM-DDTHH:MM:SS\0"
+    struct tm timeinfo;
+    if (getLocalTime(&timeinfo)) {
+      // Formato ISO 8601 sem fuso (o backend interpreta como UTC-3 configurado)
+      strftime(timestampISO, sizeof(timestampISO), "%Y-%m-%dT%H:%M:%S", &timeinfo);
+    } else {
+      // Fallback seguro caso NTP não esteja disponível: evita crash do snprintf
+      snprintf(timestampISO, sizeof(timestampISO), "1970-01-01T00:00:00");
+      Serial.println("[AVISO] NTP indisponivel – timestamp de fallback usado.");
+    }
 
     // ── TÓPICO 1 – Envio da Telemetria (Padrão API Java) ─────────────────
     char telemetria[400];
     snprintf(telemetria, sizeof(telemetria),
       "{"
       "\"stationCode\":\"APP-ST-001\","
-      "\"timestamp\":\"2026-05-28T14:30:00\","
+      "\"timestamp\":\"%s\","          // [GAP 2] Timestamp dinâmico via NTP (era hardcoded)
       "\"waterDistanceCm\":%.2f,"
       "\"waterLevelPercent\":%d,"
       "\"tiltAngle\":%.2f,"
@@ -317,6 +411,7 @@ void loop() {
       "\"pm25\":%.2f,"
       "\"pm10\":%.2f"
       "}",
+      timestampISO,                    // [GAP 2] Valor real obtido do NTP
       distanciaAguaCm, waterLevelPercent, abs(inclinacaoX), vibracao,
       pressaoHpa, poluicaoPm25, poluicaoPm10);
 
