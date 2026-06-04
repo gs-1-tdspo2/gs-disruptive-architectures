@@ -1,8 +1,10 @@
-# GS IoT — Estacao de Monitoramento Ambiental Urbano
+# Amanaje — Estação de Monitoramento de Risco Ambiental
 
 Projeto desenvolvido para a Global Solution 2026 da FIAP, disciplina Disruptive Architectures: IoT, IoB & Generative IA.
 
-O sistema implementa uma estacao de monitoramento ambiental urbano utilizando um microcontrolador ESP32, com foco na prevencao e antecipacao de quatro categorias de desastres naturais comuns em regioes metropolitanas brasileiras: enchentes, deslizamentos de encosta, tempestades e poluicao do ar.
+O sistema implementa uma estação de monitoramento ambiental utilizando um microcontrolador ESP32, com foco na prevenção e antecipação de desastres naturais comuns em regiões metropolitanas brasileiras: enchentes, deslizamentos de encosta, tempestades e poluição do ar.
+
+A estação coleta dados de múltiplos sensores a cada 5 segundos, publica telemetria e status via MQTT e recebe alertas processados por um backend Java. Ao receber um alerta, o dispositivo aciona LED vermelho e buzzer conforme o nível de risco determinado pelo backend, e exibe o resultado no display OLED local.
 
 ---
 
@@ -17,293 +19,276 @@ O sistema implementa uma estacao de monitoramento ambiental urbano utilizando um
 
 ---
 
+## Links do Projeto
+
+| Recurso | URL |
+|---|---|
+| Repositório | [github.com/gs-1-tdspo2/gs-disruptive-architectures](https://github.com/gs-1-tdspo2/gs-disruptive-architectures) |
+| API Java | [gs-java-advanced.onrender.com/](https://gs-java-advanced.onrender.com/) |
+| Dashboard | [EM PROGRESSO](https://seu-usuario.github.io/gs-disruptive-architectures) |
+| Vídeo de Apresentação | [EM PROGRESSO](https://youtu.be/seu-video) |
+
+> A API Java está hospedada no Render em plano gratuito. A primeira requisição pode demorar para receber resposta enquanto o servidor inicializa.
+
+---
+
 ## Tecnologias Utilizadas
 
 - **Microcontrolador:** ESP32 DevKit C v4
-- **Plataforma de simulacao:** Wokwi
+- **Plataforma de simulação:** Wokwi
 - **IDE / Build system:** PlatformIO (Visual Studio Code)
 - **Linguagem:** C++ (Arduino framework)
-- **Protocolo de comunicacao:** MQTT sobre Wi-Fi (TCP/IP)
-- **Broker MQTT:** HiveMQ Public Broker (`broker.hivemq.com`, porta 1883)
+- **Protocolo de comunicação:** MQTT sobre Wi-Fi (TCP/IP)
+- **Broker MQTT:** mqtt-dashboard.com (porta 1883, sem autenticação)
 - **Bibliotecas Arduino:**
   - `WiFi.h` — conectividade Wi-Fi nativa do ESP32
-  - `PubSubClient` — cliente MQTT
-  - `Adafruit_MPU6050` — driver do acelerometro/giroscopio
+  - `PubSubClient` — cliente MQTT (buffer configurado para 512 bytes)
+  - `Adafruit_MPU6050` — driver do acelerômetro e giroscópio
+  - `Adafruit_BMP085` — driver do barômetro BMP180
   - `Adafruit_SSD1306` — driver do display OLED
-  - `Adafruit_Sensor` — camada de abstracao de sensores Adafruit
-  - `Wire.h` — comunicacao I2C
+  - `Adafruit_Sensor` — camada de abstração de sensores Adafruit
+  - `Wire.h` — comunicação I2C
+  - `time.h` — cliente NTP e formatação de timestamp ISO 8601
 
 ---
 
 ## Arquitetura do Hardware
 
-### Diagrama de componentes
-
 ```
 ESP32 DevKit C v4
 |
-|-- I2C (GPIO 21/22) --> MPU6050 (acelerometro)
-|-- I2C (GPIO 21/22) --> SSD1306 OLED 128x64
-|-- GPIO 34 (ADC)    --> Potenciometro 1 (pressao atmosferica)
-|-- GPIO 35 (ADC)    --> Potenciometro 2 (poluicao PM2.5)
-|-- GPIO 5  (OUTPUT) --> HC-SR04 TRIG (ultrassonico)
-|-- GPIO 18 (INPUT)  --> HC-SR04 ECHO (ultrassonico)
+|-- I2C (GPIO 21/22) --> MPU6050 (acelerômetro/giroscópio)
+|-- I2C (GPIO 21/22) --> BMP180 (barômetro)
+|-- I2C (GPIO 21/22) --> SSD1306 OLED 128x64 (endereço 0x3C)
+|-- GPIO 35 (ADC)    --> Potenciômetro (poluição PM2.5 / PM10)
+|-- GPIO 5  (OUTPUT) --> HC-SR04 TRIG (sensor ultrassônico)
+|-- GPIO 18 (INPUT)  --> HC-SR04 ECHO (sensor ultrassônico)
 |-- GPIO 17 (OUTPUT) --> LED Verde  + resistor 220 ohm
 |-- GPIO 16 (OUTPUT) --> LED Vermelho + resistor 220 ohm
+|-- GPIO 12 (LEDC)   --> Buzzer (canal LEDC 0, 1000 Hz)
 ```
 
-O MPU6050 e o display OLED compartilham o mesmo barramento I2C. O display opera no endereco padrao `0x3C`.
+O MPU6050, BMP180 e o display OLED compartilham o mesmo barramento I2C.
 
 ---
 
 ## Sensores — O que cada um representa
 
-### MPU6050 — Acelerometro e Giroscopio (GPIO 21/22, I2C)
+### MPU6050 — Acelerômetro e Giroscópio (I2C)
 
-Representa um sensor de inclinacao instalado em uma encosta ou estrutura de contencao.
+Representa um sensor de inclinação instalado em uma encosta ou estrutura de contenção. O ângulo de inclinação é calculado a partir da aceleração linear nos eixos Y e Z em relação a força gravitacional. Na vida real, detectaria o movimento lento ou abrupto do solo antes ou durante um deslizamento.
 
-O angulo de inclinacao e calculado a partir da aceleracao linear nos eixos X e Y em relacao a forca gravitacional (9,81 m/s2). Na vida real, um sensor desse tipo detectaria o movimento lento ou abrupto do solo antes ou durante um deslizamento.
+No Wokwi, o MPU6050 pode ser manipulado clicando no componente e arrastando para simular inclinação.
 
-No Wokwi, o MPU6050 pode ser manipulado clicando no componente e arrastando para simular inclinacao.
+### BMP180 — Barômetro (I2C)
 
-Faixas de risco:
+Mede a pressão atmosférica real. Pressão em queda indica aproximação de frentes frias ou tempestades. O valor é lido diretamente do sensor em Pascals e convertido para hPa.
 
-| Inclinacao (graus) | Severidade |
-|---|---|
-| Abaixo de 15 | NORMAL |
-| 15 a 25 | ATENCAO |
-| 25 a 35 | ALERTA |
-| Acima de 35 | CRITICO |
+### Potenciômetro (GPIO 35) — Poluição do Ar (PM2.5 / PM10)
 
----
+Simula um sensor de partículas em suspensão (como o PMS5003 em uma implementação física real). O valor analógico (0 a 4095) é mapeado para 0 a 300 ug/m3 de PM2.5. O valor de PM10 é derivado multiplicando PM2.5 por 1,5.
 
-### Potenciometro 1 (GPIO 34) — Pressao Atmosferica
+### HC-SR04 — Sensor Ultrassônico de Nível de Água (GPIO 5/18)
 
-Simula um barometro digital (como o BMP280 em uma implementacao fisica real).
+Representa um sensor instalado no topo de um bueiro ou embaixo de uma ponte, apontado para baixo em direção à superfície da água. A lógica é inversa ao que se poderia supor: rio baixo significa distância grande; rio em enchente significa distância diminuindo. O alerta dispara quando a distância cai abaixo dos limiares definidos pelo backend.
 
-O valor analogico lido (0 a 4095) e mapeado de forma **invertida** para o range de 1030 a 980 hPa. O range e invertido porque pressao alta (pot zerado) indica tempo bom, e pressao baixa (pot no maximo) indica tempestade se aproximando — o que e fisicamente correto.
-
-Os thresholds sao baseados na escala Saffir-Simpson da NOAA e em dados meteorologicos reais. A pressao media padrao ao nivel do mar e 1013,25 hPa (NOAA).
-
-Mapeamento do potenciometro:
-
-| Posicao do pot | Pressao simulada | Situacao real |
-|---|---|---|
-| Zero (repouso) | 1030 hPa | Alta pressao, tempo estavel |
-| ~40% | ~1013 hPa | Pressao padrao ao nivel do mar |
-| ~60% | ~1005 hPa | Baixa pressao moderada |
-| ~85% | ~992 hPa | Depressao tropical |
-| Maximo | 980 hPa | Limiar de furacao Categoria 1 |
-
-Faixas de risco:
-
-| Pressao (hPa) | Severidade |
-|---|---|
-| Acima de 1005 | NORMAL |
-| 992 a 1005 | ATENCAO |
-| 980 a 992 | ALERTA |
-| 980 ou abaixo | CRITICO |
+Opera com timeout de 30 ms (~510 cm de alcance máximo). Leituras inválidas são tratadas como dado ausente e não disparam alerta falso.
 
 ---
 
-### Potenciometro 2 (GPIO 35) — Poluicao do Ar (PM2.5)
+## Saídas — LEDs, Buzzer e OLED
 
-Simula um sensor de particulas em suspensao (como o PMS5003 em uma implementacao fisica real).
+### LED Verde (GPIO 17)
 
-O valor analogico e mapeado para o range de 0 a 300 microgramas por metro cubico (ug/m3), que e a escala real de concentracao de PM2.5. Os thresholds sao baseados nas diretrizes da OMS e nos padroes do CONAMA.
+Aceso por padrão ao iniciar o sistema. Apaga quando o backend envia `ledVerde: false` no payload de alerta.
 
-Faixas de risco:
+### LED Vermelho (GPIO 16)
 
-| PM2.5 (ug/m3) | Severidade |
-|---|---|
-| Abaixo de 50 | NORMAL |
-| 50 a 100 | ATENCAO |
-| 100 a 200 | ALERTA |
-| Acima de 200 | CRITICO |
+Apagado por padrão. Acende quando o backend envia `ledVermelho: true` — indica risco ALTO ou CRITICO.
 
----
+### Buzzer (GPIO 12)
 
-### HC-SR04 — Sensor Ultrassonico (GPIO 5/18)
+Silencioso por padrão. Ativado em 1000 Hz quando o backend envia `buzzer: true` — indica risco CRITICO.
 
-Representa um sensor de nivel de agua instalado no topo de um bueiro, galeria pluvial ou embaixo de uma ponte, apontado para baixo em direcao a superficie da agua.
+Mapeamento de nível de risco para atuadores (definido pelo backend Java):
 
-A logica e **inversa** ao que se poderia supor intuitivamente:
+| nivelRisco | LED Verde | LED Vermelho | Buzzer |
+|---|---|---|---|
+| BAIXO | true | false | false |
+| MODERADO | true | false | false |
+| ALTO | false | true | false |
+| CRITICO | false | true | true |
 
-- Rio baixo (situacao normal): a agua esta longe do sensor, a distancia medida e **grande**.
-- Rio em enchente: a agua sobe em direcao ao sensor, a distancia medida **diminui**.
+### Display OLED SSD1306 128x64 (I2C, 0x3C)
 
-Portanto, o alerta dispara quando a distancia cai abaixo dos thresholds, nao quando aumenta.
+Exibe telemetria em tempo real, atualizada a cada 5 segundos. Quando o backend publica um alerta de nível MODERADO, ALTO ou CRITICO, a tela alterna automaticamente entre a tela de alerta e a tela de telemetria a cada 4 segundos, garantindo que o operador veja sempre os dois contextos. Para nível BAIXO, a tela de alerta não é exibida.
 
-O sensor opera com um timeout de 30 ms (equivalente a aproximadamente 510 cm de alcance maximo). Leituras invalidas (sem eco) sao tratadas como dado ausente e nao disparam alerta falso.
-
-Faixas de risco:
-
-| Distancia ate a agua (cm) | Severidade |
-|---|---|
-| Acima de 120 | NORMAL |
-| 80 a 120 | ATENCAO |
-| 50 a 80 | ALERTA |
-| Abaixo de 50 | CRITICO |
-
----
-
-### LED Verde (GPIO 17) — Saida 1
-
-Aceso continuamente enquanto todos os sensores estiverem dentro da faixa NORMAL. Apaga imediatamente ao primeiro alerta de qualquer sensor.
-
-### LED Vermelho (GPIO 16) — Saida 2
-
-Apagado em condicao normal. Acende imediatamente quando qualquer sensor sair da faixa NORMAL (independente do nivel de severidade).
-
-### Display OLED SSD1306 128x64 (I2C, 0x3C) — Interface Local
-
-Exibe o estado completo do sistema em tempo real, atualizado a cada 5 segundos. Layout:
+Tela de telemetria normal:
 
 ```
-!!! CRITICO !!!          <- status geral (pior severidade ativa)
-Agua  25.3cm [!!!]       <- distancia + badge de severidade
-Pres 1013.0hP            <- pressao (sem badge = NORMAL)
-PM25  85.2ug [ ! ]       <- PM2.5 com badge ALERTA
-Incl   3.1 gr            <- inclinacao (sem badge = NORMAL)
-ENC:CRT PM:ALT           <- resumo dos alertas ativos
+   Sistema OK
+Agua  25.3cm
+Pres 1013.0hPa
+PM25   0.0ug/m3
+Inc    0.0 graus
+10.13.37.2
 ```
 
-Badges de severidade:
+Tela de alerta (exibida ao receber payload do backend):
 
-| Badge | Significado |
-|---|---|
-| (sem badge) | NORMAL |
-| `[ ? ]` | ATENCAO |
-| `[ ! ]` | ALERTA |
-| `[!!!]` | CRITICO |
+```
+RISCO CRITICO
+Tipo: ENCHENTE
+Score: 91
+Risco critico detectado.
+Acionar alerta preventiv
+```
 
-O sistema opera normalmente mesmo se o OLED nao for detectado na inicializacao.
+O sistema opera normalmente mesmo se o OLED não for detectado na inicialização.
 
 ---
 
-## Comunicacao MQTT
+## Comunicação MQTT
 
-Broker: `broker.hivemq.com`, porta `1883`, sem autenticacao (broker publico).
+Broker: `mqtt-dashboard.com`, porta `1883`, sem autenticação.
 
-### Topico 1 — Telemetria Completa
+O buffer do cliente MQTT está configurado em 512 bytes para suportar os payloads de alerta (~250 bytes). O buffer padrão de 128 bytes descartaria as mensagens silenciosamente.
 
-`fiap/global_solution/estacao1/telemetria`
+Para monitorar os tópicos em tempo real pelo navegador, acesse o [HiveMQ WebSocket Client](https://www.hivemq.com/demos/websocket-client/), conecte ao broker `mqtt-dashboard.com` na porta `8000` (WebSocket) e assine os tópicos listados abaixo.
 
-Publicado a cada 5 segundos com todos os valores dos sensores e suas severidades.
+---
 
-Exemplo de payload:
+### Tópico 1 — Telemetria
+
+`app/estacoes/AMANAJE-SP-RP-001/telemetria`
+
+Publicado a cada 5 segundos com todos os valores dos sensores.
 
 ```json
 {
-  "codigoEstacao": "APP-ST-001",
-  "distanciaAguaCm": 95.40,
-  "distValida": true,
-  "sevEnchente": "ATENCAO",
-  "pressaoHpa": 1010.00,
-  "sevPressao": "NORMAL",
-  "poluicaoPm25": 120.00,
-  "sevPM25": "ALERTA",
-  "inclinacaoX": 8.20,
-  "inclinacaoY": 1.10,
-  "sevInclinacao": "NORMAL",
-  "alertaGeral": true
+  "stationCode": "AMANAJE-SP-RP-001",
+  "timestamp": "2026-06-03T19:47:38",
+  "waterDistanceCm": 399.93,
+  "waterLevelPercent": 0,
+  "tiltAngle": 0.00,
+  "vibration": 0.00,
+  "pressureHpa": 1013.27,
+  "pm25": 0.00,
+  "pm10": 0.00
 }
 ```
 
 ---
 
-### Topico 2 — Alertas Individuais
+### Tópico 2 — Status
 
-`fiap/global_solution/estacao1/alertas`
+`app/estacoes/AMANAJE-SP-RP-001/status`
 
-Publicado a cada ciclo de 5 segundos **apenas para os sensores com severidade acima de NORMAL**. Cada sensor gera sua propria mensagem independente — se tres sensores estiverem em alerta simultaneamente, tres mensagens sao publicadas neste topico.
-
-Exemplo de payload:
+Publicado a cada 30 segundos com informações de saúde do dispositivo.
 
 ```json
 {
-  "codigoEstacao": "APP-ST-001",
-  "tipo": "POLUICAO",
-  "valor": 120.00,
-  "unidade": "ug/m3",
-  "severidade": "ALERTA"
-}
-```
-
-Tipos possiveis: `ENCHENTE`, `TEMPESTADE`, `POLUICAO`, `DESLIZAMENTO`.
-
-Severidades possiveis: `ATENCAO`, `ALERTA`, `CRITICO`.
-
----
-
-### Topico 3 — Status / Heartbeat
-
-`fiap/global_solution/estacao1/status`
-
-Publicado a cada 30 segundos com informacoes de saude do dispositivo.
-
-Exemplo de payload:
-
-```json
-{
-  "codigoEstacao": "APP-ST-001",
+  "stationCode": "AMANAJE-SP-RP-001",
+  "mac": "24:0A:C4:00:01:10",
   "uptimeSeg": 3600,
-  "rssi": -62,
+  "rssi": -78,
   "ip": "10.13.37.2",
-  "oled": true,
-  "firmware": "1.4.0"
+  "versaoFirmware": "1.4.0"
 }
 ```
 
 ---
 
-### Topico 4 — Comando (subscrito)
+### Tópico 3 — Alertas (subscrito)
 
-`fiap/global_solution/estacao1/comando`
+`app/estacoes/AMANAJE-SP-RP-001/alertas`
 
-O dispositivo assina este topico e aguarda comandos enviados pelo backend. Atualmente suporta o comando `reset`, que reinicia o ESP32 remotamente.
+O dispositivo assina este tópico e aguarda o resultado da análise publicado pelo backend Java. Ao receber o payload, o ESP32 aplica imediatamente o estado dos atuadores e atualiza o OLED.
+
+```json
+{
+  "stationCode": "AMANAJE-SP-RP-001",
+  "nivelRisco": "CRITICO",
+  "tipoRiscoPrincipal": "ENCHENTE",
+  "score": 91,
+  "alerta": true,
+  "ledVerde": false,
+  "ledVermelho": true,
+  "buzzer": true,
+  "mensagem": "Risco critico detectado. Acionar alerta preventivo imediatamente.",
+  "timestamp": "2026-06-03T18:40:00"
+}
+```
 
 ---
 
-## Como Executar no Wokwi
+## Como Executar o Projeto
 
-1. Acesse [wokwi.com](https://wokwi.com) e crie um novo projeto ESP32.
-2. Substitua o conteudo do `diagram.json` pelo arquivo `diagram.json` deste repositorio.
-3. Substitua o conteudo do `main.cpp` (dentro de `src/`) pelo arquivo `src/main.cpp` deste repositorio.
-4. Certifique-se de que as seguintes bibliotecas estao declaradas no `libraries.txt` ou `wokwi.toml`:
-   - `Adafruit MPU6050`
-   - `Adafruit SSD1306`
-   - `Adafruit BusIO`
-   - `PubSubClient`
-5. Inicie a simulacao. O Serial Monitor exibira o progresso da conexao Wi-Fi e MQTT.
-6. Para monitorar os dados em tempo real pelo navegador, acesse o cliente WebSocket publico do HiveMQ em `http://www.hivemq.com/demos/websocket-client/` e assine os topicos listados acima.
+O projeto utiliza **VSCode + PlatformIO + extensão Wokwi** para simulação local. Não é necessário acessar o Wokwi online.
 
-### Como simular alertas
+### Pré-requisitos
 
-| Sensor | Acao no Wokwi | Efeito |
+- [Visual Studio Code](https://code.visualstudio.com/)
+- Extensão [PlatformIO IDE](https://marketplace.visualstudio.com/items?itemName=platformio.platformio-ide) instalada no VSCode
+- Extensão [Wokwi for VS Code](https://marketplace.visualstudio.com/items?itemName=wokwi.wokwi-vscode) instalada no VSCode
+- Conta Wokwi com licença ativa (gratuita para uso pessoal — faça login em [wokwi.com](https://wokwi.com) e siga as instruções da extensão para vincular a licença)
+
+### Passos
+
+1. Clone o repositório e abra a pasta raiz no VSCode.
+2. Aguarde o PlatformIO inicializar o ambiente e baixar as dependências automaticamente — isso pode levar alguns minutos na primeira vez.
+3. Clique em **Build** na barra inferior do PlatformIO (ícone de checkmark) ou use o atalho `Ctrl+Alt+B`. O firmware compilado será gerado em `.pio/build/amanaje/firmware.bin`.
+4. Abra o arquivo `amanaje/diagram.json` no VSCode. A extensão Wokwi detectará o arquivo automaticamente.
+5. Caso seja solicitado, vincule sua licença Wokwi pela paleta de comandos (`Ctrl+Shift+P` > `Wokwi: Request License`).
+6. Pressione `F1` > `Wokwi: Start Simulator` ou clique no botão de play que aparece no canto superior esquerdo do `diagram.json`.
+7. O Serial Monitor integrado exibirá o progresso da conexão Wi-Fi, sincronização NTP e conexão MQTT.
+
+---
+
+### Como simular leituras
+
+| Componente | Como interagir | Efeito simulado |
 |---|---|---|
-| Pressao atmosferica | Girar o potenciometro 1 para a direita | Pressao cai de 1030 para 980 hPa |
-| Poluicao PM2.5 | Girar o potenciometro 2 para a direita | PM2.5 sobe de 0 para 300 ug/m3 |
-| Nivel de agua | Diminuir a distancia no HC-SR04 | Simula subida do rio |
-| Deslizamento | Clicar e inclinar o MPU6050 | Simula movimento de encosta |
+| **Potenciômetro (slider)** | Clicar e arrastar o slider para a direita | PM2.5 sobe de 0 a 300 ug/m3; PM10 é derivado (x1,5) |
+| **HC-SR04** | Clicar no sensor e reduzir o valor de distância | Simula subida do nível da água em direção ao sensor |
+| **MPU6050** | Clicar no componente e arrastar para inclinar | Simula movimento de encosta ou deslizamento |
+| **BMP180** | Clicar no sensor e arrastar no sentido horizontal | Simula queda ou aumento de pressão atmosférica e temperatura |
+
+### Como testar o recebimento de alertas
+
+Publique o payload abaixo no tópico `app/estacoes/AMANAJE-SP-RP-001/alertas` usando o [HiveMQ WebSocket Client](https://www.hivemq.com/demos/websocket-client/) ou qualquer outro cliente MQTT (ex: MQTT Explorer):
+
+```json
+{
+  "stationCode": "AMANAJE-SP-RP-001",
+  "nivelRisco": "CRITICO",
+  "tipoRiscoPrincipal": "ENCHENTE",
+  "score": 91,
+  "alerta": true,
+  "ledVerde": false,
+  "ledVermelho": true,
+  "buzzer": true,
+  "mensagem": "Risco critico detectado. Acionar alerta preventivo imediatamente.",
+  "timestamp": "2026-06-03T18:40:00"
+}
+```
+
+O Serial Monitor confirmará o recebimento exibindo todos os campos parseados e o estado aplicado aos atuadores. O LED vermelho acenderá, o buzzer será ativado e o OLED alternará entre a tela de alerta e a telemetria a cada 4 segundos.
 
 ---
 
-## Estrutura do Repositorio
+## Estrutura do Repositório
 
 ```
-gs-iot/
-|-- src/
-|   `-- main.cpp          <- codigo-fonte principal do firmware
-|-- diagram.json          <- circuito do Wokwi
-|-- platformio.ini        <- configuracao do PlatformIO
-|-- .gitignore
-|-- LICENSE
-`-- README.md
+gs-disruptive-architectures/
+├── amanaje/
+|   ├── src/
+|   |   └── main.cpp          <- firmware principal do ESP32
+|   ├── diagram.json          <- circuito do Wokwi
+|   └── wokwi.toml            <- configuração de bibliotecas do Wokwi
+├── src/
+|   └── main.cpp              <- configurações de Wifi e MQTT
+├── .gitignore
+├── platformio.ini            <- configuração do PlatformIO
+└── README.md
 ```
-
----
-
-## Licenca
-
-Consulte o arquivo `LICENSE` neste repositorio.
