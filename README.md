@@ -1,4 +1,4 @@
-# Amanaje — Estação de Monitoramento de Risco Ambiental
+# Amanajé — Estação de Monitoramento de Risco Ambiental
 
 Projeto desenvolvido para a Global Solution 2026 da FIAP, disciplina Disruptive Architectures: IoT, IoB & Generative IA.
 
