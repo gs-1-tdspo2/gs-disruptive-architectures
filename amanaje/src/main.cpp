@@ -5,13 +5,13 @@
 #include <Adafruit_Sensor.h>
 #include <Adafruit_SSD1306.h>
 #include <Adafruit_BMP085.h>
-#include <time.h>           // Biblioteca para cliente NTP e formatação de tempo
+#include <time.h>           // Biblioteca para cliente NTP e formatacao de tempo
 
-// ─── Wi-Fi ───────────────────────────────────────────────────────────────────
+// === Wi-Fi ===================================================================
 const char* ssid     = "Wokwi-GUEST";
 const char* password = "";
 
-// ─── MQTT ────────────────────────────────────────────────────────────────────
+// === MQTT ====================================================================
 const char* mqtt_server = "mqtt-dashboard.com";
 const int   mqtt_port   = 1883;
 
@@ -19,42 +19,55 @@ const char* TOPIC_TELEMETRIA = "app/estacoes/AMANAJE-SP-RP-001/telemetria";
 const char* TOPIC_STATUS     = "app/estacoes/AMANAJE-SP-RP-001/status";
 const char* TOPIC_COMANDO    = "app/estacoes/AMANAJE-SP-RP-001/alertas";
 
-// ─── Pinos ───────────────────────────────────────────────────────────────────
+// === Pinos ===================================================================
 #define PIN_POT_POLUICAO 35
 #define PIN_TRIG          5
 #define PIN_ECHO         18
 #define PIN_LED_VERDE    17
 #define PIN_LED_VERMELHO 16
-#define PIN_BUZZER       12 // [GAP 1] GPIO 12 conforme PRD
+#define PIN_BUZZER       12
 
 #define ULTRASONIC_TIMEOUT_US 30000UL
 
-// ─── OLED ────────────────────────────────────────────────────────────────────
+// === Buzzer LEDC =============================================================
 #define BUZZER_FREQ_HZ      1000
 #define BUZZER_LEDC_CHANNEL    0
 #define BUZZER_LEDC_RES       10
 
-// ─── OLED ────────────────────────────────────────────────────────────────────
+// === OLED ====================================================================
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
 #define OLED_RESET -1
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 bool oledDisponivel = false;
 
-// ─── Objetos globais ──────────────────────────────────────────────────────────
+// === Objetos globais ==========================================================
 WiFiClient   espClient;
 PubSubClient client(espClient);
 Adafruit_MPU6050 mpu;
 Adafruit_BMP085  bmp;
 
-unsigned long lastTelemetria    = 0;
-unsigned long lastStatus        = 0;
-unsigned long startTime         = 0;
+unsigned long lastTelemetria = 0;
+unsigned long lastStatus     = 0;
+unsigned long startTime      = 0;
 
-// ─── Estado do alerta recebido via MQTT (Java → ESP32) ───────────────────────
+// === Snapshot da ultima leitura (para OLED alternar sem re-ler sensores) =====
+struct Leitura {
+  float dist          = 0;
+  bool  distValida    = false;
+  float pressao       = 0;
+  float pm25          = 0;
+  float incX          = 0;
+} ultimaLeitura;
+
+// === Estado do alerta recebido via MQTT (Java -> ESP32) ======================
+// A OLED alterna: 4s mostrando alerta, 4s mostrando telemetria, enquanto ativo.
+#define OLED_FASE_MS 4000
+
 struct AlertaMQTT {
-  bool  ativo         = false;   // true enquanto a tela de alerta deve ser exibida
-  unsigned long recebidoMs = 0;  // millis() no momento do recebimento
+  bool  ativo            = false;
+  unsigned long faseMs   = 0;   // millis() do inicio da fase atual
+  bool  mostandoAlerta   = true; // qual das duas telas esta no ar agora
   char  nivelRisco[12]   = "";
   char  tipoPrincipal[20]= "";
   int   score            = 0;
@@ -64,9 +77,7 @@ struct AlertaMQTT {
   bool  buzzer           = false;
 } alertaMQTT;
 
-#define ALERTA_OLED_DURACAO_MS 5000  // Tempo que a tela de alerta fica visível
-
-// ─── Callback MQTT ───────────────────────────────────────────────────────────
+// === Callback MQTT ===========================================================
 // Recebe o payload de alertas publicado pelo Java e atualiza o estado global.
 // Campos esperados: ledVerde, ledVermelho, buzzer, nivelRisco,
 //                   tipoRiscoPrincipal, score, mensagem.
@@ -80,7 +91,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
   Serial.println("[MQTT] Payload : " + msg);
   Serial.println("-------------------------------------");
 
-  // ── Extrai ledVerde ──────────────────────────────────────────────────────
+  // == Extrai ledVerde
   int idxLV = msg.indexOf("\"ledVerde\"");
   if (idxLV >= 0) {
     String sub = msg.substring(idxLV + 10);
@@ -89,7 +100,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     alertaMQTT.ledVerde = sub.startsWith("true");
   }
 
-  // ── Extrai ledVermelho ───────────────────────────────────────────────────
+  // Extrai ledVermelho
   int idxLR = msg.indexOf("\"ledVermelho\"");
   if (idxLR >= 0) {
     String sub = msg.substring(idxLR + 13);
@@ -98,7 +109,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     alertaMQTT.ledVermelho = sub.startsWith("true");
   }
 
-  // ── Extrai buzzer ────────────────────────────────────────────────────────
+  // Extrai buzzer
   int idxBZ = msg.indexOf("\"buzzer\"");
   if (idxBZ >= 0) {
     String sub = msg.substring(idxBZ + 8);
@@ -107,7 +118,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     alertaMQTT.buzzer = sub.startsWith("true");
   }
 
-  // ── Extrai nivelRisco ────────────────────────────────────────────────────
+  // Extrai nivelRisco
   int idxNR = msg.indexOf("\"nivelRisco\"");
   if (idxNR >= 0) {
     int ini = msg.indexOf('"', idxNR + 12);
@@ -118,7 +129,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     }
   }
 
-  // ── Extrai tipoRiscoPrincipal ────────────────────────────────────────────
+  // Extrai tipoRiscoPrincipal
   int idxTP = msg.indexOf("\"tipoRiscoPrincipal\"");
   if (idxTP >= 0) {
     int ini = msg.indexOf('"', idxTP + 20);
@@ -129,7 +140,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     }
   }
 
-  // ── Extrai score ─────────────────────────────────────────────────────────
+  // Extrai score
   int idxSC = msg.indexOf("\"score\"");
   if (idxSC >= 0) {
     int ini = idxSC + 7;
@@ -137,7 +148,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     alertaMQTT.score = msg.substring(ini).toInt();
   }
 
-  // ── Extrai mensagem (primeiros 79 chars) ─────────────────────────────────
+  // Extrai mensagem (primeiros 79 chars)
   int idxMSG = msg.indexOf("\"mensagem\"");
   if (idxMSG >= 0) {
     int ini = msg.indexOf('"', idxMSG + 10);
@@ -148,18 +159,15 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     }
   }
 
-  // ── Aplica LEDs imediatamente ────────────────────────────────────────────
+  // Aplica LEDs e buzzer imediatamente
   digitalWrite(PIN_LED_VERDE,    alertaMQTT.ledVerde    ? HIGH : LOW);
   digitalWrite(PIN_LED_VERMELHO, alertaMQTT.ledVermelho ? HIGH : LOW);
-
-  // Buzzer: se o campo buzzer=true, ativa a sirene; caso contrário, desliga.
   if (alertaMQTT.buzzer) {
     ledcWriteTone(BUZZER_LEDC_CHANNEL, BUZZER_FREQ_HZ);
   } else {
     ledcWrite(BUZZER_LEDC_CHANNEL, 0);
   }
 
-  // ── Log de confirmação dos campos parseados ──────────────────────────────
   Serial.println("[ALERTA] nivelRisco    : " + String(alertaMQTT.nivelRisco));
   Serial.println("[ALERTA] tipoPrincipal : " + String(alertaMQTT.tipoPrincipal));
   Serial.println("[ALERTA] score         : " + String(alertaMQTT.score));
@@ -167,14 +175,15 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
   Serial.println("[ALERTA] ledVermelho   : " + String(alertaMQTT.ledVermelho ? "true" : "false"));
   Serial.println("[ALERTA] buzzer        : " + String(alertaMQTT.buzzer      ? "true" : "false"));
   Serial.println("[ALERTA] mensagem      : " + String(alertaMQTT.mensagem));
-  Serial.println("[ALERTA] Atuadores aplicados. OLED em modo alerta por 5s.");
+  Serial.println("[ALERTA] Atuadores aplicados. OLED alternando alerta/telemetria.");
 
-  // ── Ativa exibição do alerta na OLED ────────────────────────────────────
-  alertaMQTT.ativo      = true;
-  alertaMQTT.recebidoMs = millis();
+  // Ativa alternancia na OLED — comeca exibindo o alerta
+  alertaMQTT.ativo          = true;
+  alertaMQTT.mostandoAlerta = true;
+  alertaMQTT.faseMs         = millis();
 }
 
-// ─── Wi-Fi + NTP ─────────────────────────────────────────────────────────────
+// === Wi-Fi + NTP =============================================================
 void setup_wifi() {
   delay(10);
   Serial.println("\n--- Conectando ao WiFi ---");
@@ -184,7 +193,7 @@ void setup_wifi() {
   Serial.println("\nWiFi OK: " + WiFi.localIP().toString());
   Serial.println("MAC: " + WiFi.macAddress());
 
-  // [GAP 2] NTP para Horário de Brasília (UTC-3)
+  // NTP para Horario de Brasilia (UTC-3)
   configTime(-3 * 3600, 0, "pool.ntp.org", "time.nist.gov");
   Serial.println("NTP configurado. Aguardando sincronizacao...");
   struct tm timeinfo;
@@ -193,7 +202,7 @@ void setup_wifi() {
   Serial.println(t < 20 ? "\nNTP OK!" : "\n[AVISO] NTP sem sync.");
 }
 
-// ─── Reconexão MQTT ──────────────────────────────────────────────────────────
+// === Reconexao MQTT ==========================================================
 void reconnect() {
   while (!client.connected()) {
     Serial.print("[MQTT] Conectando ao broker " + String(mqtt_server) + "...");
@@ -209,7 +218,7 @@ void reconnect() {
   }
 }
 
-// ─── OLED – tela de telemetria normal ────────────────────────────────────────
+// === OLED - tela de telemetria normal ========================================
 void atualizarDisplay(float dist, bool distValida, float pressao, float pm25, float incX) {
   if (!oledDisponivel) return;
   display.clearDisplay();
@@ -230,33 +239,33 @@ void atualizarDisplay(float dist, bool distValida, float pressao, float pm25, fl
   display.display();
 }
 
-// ─── OLED – tela de alerta recebido do Java ──────────────────────────────────
-// Exibida por ALERTA_OLED_DURACAO_MS ms após receber mensagem no tópico alertas.
+// === OLED - tela de alerta recebido do Java ==================================
+// Exibida por ALERTA_OLED_DURACAO_MS ms apos receber mensagem no topico alertas.
 void exibirTelaAlerta() {
   if (!oledDisponivel) return;
   display.clearDisplay();
   display.setTextSize(1);
   display.setTextColor(SSD1306_WHITE);
 
-  // Linha 0 – nível de risco em destaque
+  // Linha 0 - nivel de risco em destaque
   display.setCursor(0, 0);
   char titulo[22];
   snprintf(titulo, sizeof(titulo), "RISCO %s", alertaMQTT.nivelRisco);
   display.println(titulo);
 
-  // Linha 1 – tipo principal
+  // Linha 1 - tipo principal
   display.setCursor(0, 12);
   char tipo[22];
   snprintf(tipo, sizeof(tipo), "Tipo: %s", alertaMQTT.tipoPrincipal);
   display.println(tipo);
 
-  // Linha 2 – score
+  // Linha 2 - score
   display.setCursor(0, 24);
   char sc[22];
   snprintf(sc, sizeof(sc), "Score: %d", alertaMQTT.score);
   display.println(sc);
 
-  // Linhas 3-4 – trecho da mensagem (max 2 linhas de 21 chars)
+  // Linhas 3-4 - trecho da mensagem (max 2 linhas de 21 chars)
   display.setCursor(0, 36);
   char linha1[22], linha2[22];
   strncpy(linha1, alertaMQTT.mensagem,      21); linha1[21] = '\0';
@@ -268,7 +277,7 @@ void exibirTelaAlerta() {
   display.display();
 }
 
-// ─── Setup ───────────────────────────────────────────────────────────────────
+// === Setup ===================================================================
 void setup() {
   Serial.begin(115200);
 
@@ -277,7 +286,7 @@ void setup() {
   pinMode(PIN_TRIG, OUTPUT);
   pinMode(PIN_ECHO, INPUT);
 
-  // [GAP 1 – FIX] Core 2.x: ledcSetup + ledcAttachPin em vez de ledcAttachChannel
+  // [GAP 1 - FIX] Core 2.x: ledcSetup + ledcAttachPin em vez de ledcAttachChannel
   ledcSetup(BUZZER_LEDC_CHANNEL, BUZZER_FREQ_HZ, BUZZER_LEDC_RES);
   ledcAttachPin(PIN_BUZZER, BUZZER_LEDC_CHANNEL);
   ledcWrite(BUZZER_LEDC_CHANNEL, 0);
@@ -301,7 +310,7 @@ void setup() {
 
   client.setServer(mqtt_server, mqtt_port);
   client.setCallback(mqttCallback);
-  // Buffer padrão do PubSubClient é 128 bytes — payloads de alerta chegam a
+  // Buffer padrao do PubSubClient e 128 bytes — payloads de alerta chegam a
   // ~250 bytes e seriam descartados silenciosamente sem essa linha.
   client.setBufferSize(512);
 
@@ -309,17 +318,18 @@ void setup() {
   Serial.println("Sistema pronto.");
 }
 
-// ─── Loop ────────────────────────────────────────────────────────────────────
+// === Loop ====================================================================
 void loop() {
   if (!client.connected()) reconnect();
   client.loop();
 
   unsigned long agora = millis();
 
-  // ── Gerencia expiração da tela de alerta MQTT ─────────────────────────────
-  if (alertaMQTT.ativo && (agora - alertaMQTT.recebidoMs >= ALERTA_OLED_DURACAO_MS)) {
-    alertaMQTT.ativo = false;
-    Serial.println("[ALERTA] Tela de alerta encerrada. Retornando à telemetria.");
+  // Alternancia OLED: 4s alerta / 4s telemetria, apenas para MODERADO, ALTO ou CRITICO.
+  // BAIXO e ausencia de alerta mostram sempre a telemetria.
+  if (alertaMQTT.ativo && (agora - alertaMQTT.faseMs >= OLED_FASE_MS)) {
+    alertaMQTT.mostandoAlerta = !alertaMQTT.mostandoAlerta;
+    alertaMQTT.faseMs = agora;
   }
 
   if (agora - lastTelemetria > 5000) {
@@ -334,7 +344,7 @@ void loop() {
     // 2. BMP180
     float pressaoHpa = bmp.readPressure() / 100.0f;
 
-    // 3. Potenciômetro → PM2.5 / PM10
+    // 3. Potenciometro - PM2.5 / PM10
     float poluicaoPm25 = (float)map(analogRead(PIN_POT_POLUICAO), 0, 4095, 0, 300);
     float poluicaoPm10 = poluicaoPm25 * 1.5f;
 
@@ -359,14 +369,18 @@ void loop() {
       Serial.println("[AVISO] NTP indisponivel.");
     }
 
-    // 6. OLED: tela de alerta MQTT ou telemetria normal
-    if (alertaMQTT.ativo) {
+    // 6. OLED: alterna alerta/telemetria so para MODERADO, ALTO ou CRITICO
+    bool nivelRelevante = (strcmp(alertaMQTT.nivelRisco, "MODERADO") == 0 ||
+                           strcmp(alertaMQTT.nivelRisco, "ALTO")     == 0 ||
+                           strcmp(alertaMQTT.nivelRisco, "CRITICO")  == 0);
+
+    if (alertaMQTT.ativo && nivelRelevante && alertaMQTT.mostandoAlerta) {
       exibirTelaAlerta();
     } else {
       atualizarDisplay(distanciaAguaCm, distValida, pressaoHpa, poluicaoPm25, abs(inclinacaoX));
     }
 
-    // 7. MQTT – Telemetria
+    // 7. MQTT - Telemetria
     char telemetria[400];
     snprintf(telemetria, sizeof(telemetria),
       "{\"stationCode\":\"AMANAJE-SP-RP-001\","
@@ -384,7 +398,7 @@ void loop() {
     Serial.print("[TELEMETRIA] "); Serial.println(telemetria);
   }
 
-  // MQTT – Status [TÓPICO 2]
+  // MQTT - Status
   if (agora - lastStatus > 30000) {
     lastStatus = agora;
     char statusPayload[200];
