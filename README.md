@@ -25,7 +25,8 @@ A estação coleta dados de múltiplos sensores a cada 5 segundos, publica telem
 |---|---|
 | Repositório | [github.com/gs-1-tdspo2/gs-disruptive-architectures](https://github.com/gs-1-tdspo2/gs-disruptive-architectures) |
 | API Java | [gs-java-advanced.onrender.com/](https://gs-java-advanced.onrender.com/) |
-| Dashboard | [EM PROGRESSO](https://seu-usuario.github.io/gs-disruptive-architectures) |
+| Site | [https://amanaje.vercel.app/](https://amanaje.vercel.app/) |
+| Dashboard (Exemplo do Vídeo) | [https://amanaje.vercel.app/estacoes/9?idRegiao=8](https://amanaje.vercel.app/estacoes/9?idRegiao=8) |
 | Vídeo de Apresentação | [EM PROGRESSO](https://youtu.be/seu-video) |
 
 > A API Java está hospedada no Render em plano gratuito. A primeira requisição pode demorar para receber resposta enquanto o servidor inicializa.
