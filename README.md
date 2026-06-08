@@ -27,7 +27,7 @@ A estação coleta dados de múltiplos sensores a cada 5 segundos, publica telem
 | API Java | [gs-java-advanced.onrender.com/](https://gs-java-advanced.onrender.com/) |
 | Site | [https://amanaje.vercel.app/](https://amanaje.vercel.app/) |
 | Dashboard (Exemplo do Vídeo) | [https://amanaje.vercel.app/estacoes/9?idRegiao=8](https://amanaje.vercel.app/estacoes/9?idRegiao=8) |
-| Vídeo de Apresentação | [EM PROGRESSO](https://youtu.be/seu-video) |
+| Vídeo de Apresentação | [https://www.youtube.com/watch?v=y41tcAaU3Dw](https://www.youtube.com/watch?v=y41tcAaU3Dw) |
 
 > A API Java está hospedada no Render em plano gratuito. A primeira requisição pode demorar para receber resposta enquanto o servidor inicializa.
 
